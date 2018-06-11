@@ -9,6 +9,10 @@ const co = require('./lib/co')
 const createClient = require('..')
 const cflProfile = require('../p/cfl')
 const products = require('../p/cfl/products')
+const {
+	line: createValidateLine,
+	journeyLeg: createValidateJourneyLeg
+} = require('./lib/validators')
 const createValidate = require('./lib/validate-fptf-with')
 const testJourneysStationToStation = require('./lib/journeys-station-to-station')
 const testJourneysStationToAddress = require('./lib/journeys-station-to-address')
@@ -18,11 +22,26 @@ const journeysFailsWithNoProduct = require('./lib/journeys-fails-with-no-product
 const testDepartures = require('./lib/departures')
 
 const when = createWhen('Europe/Berlin', 'de-DE')
-
-const validate = createValidate({
+const cfg = {
 	when,
 	products
-}, {})
+}
+
+const _validateLine = createValidateLine(cfg)
+const validateLine = (validate, l, name) => {
+	if (!l.direction) l = Object.assign({}, l, {direction: 'foo'})
+	_validateLine(validate, l, name)
+}
+const _validateJourneyLeg = createValidateJourneyLeg(cfg)
+const validateJourneyLeg = (validate, l, name) => {
+	if (!l.direction) l = Object.assign({}, l, {direction: 'foo'})
+	_validateJourneyLeg(validate, l, name)
+}
+
+const validate = createValidate(cfg, {
+	line: validateLine,
+	journeyLeg: validateJourneyLeg
+})
 
 const test = tapePromise(tape)
 const client = createClient(cflProfile)
@@ -102,7 +121,7 @@ test('Luxembourg to Kloster Unser Lieben Frauen', co(function*(t) {
 		journeys,
 		validate,
 		fromId: luxembourg,
-		to: kloster
+		to: centreHospitalier
 	})
 	t.end()
 }))
