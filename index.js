@@ -275,6 +275,72 @@ const createClient = (profile, userAgent, request = _request) => {
 		})
 	}
 
+	const journeysFromTrip = (fromTripId, firstStation, departureAtFirst, to, opt = {}) => {
+		if (!isNonEmptyString(fromTripId)) {
+			throw new Error('fromTripId must be a non-empty string.')
+		}
+		to = profile.formatLocation(profile, to, 'to')
+
+		// first station of the whole trip
+		if (isObj(firstStation)) firstStation = profile.formatStation(firstStation.id)
+		else if ('string' === typeof firstStation) firstStation = profile.formatStation(firstStation)
+		else throw new Error('firstStation must be an object or a string.')
+		// departureAtFirst at the first station of the whole trip
+		departureAtFirst = +new Date(departureAtFirst)
+		if (Number.isNaN(departureAtFirst)) throw new Error('departureAtFirst is invalid')
+
+		opt = Object.assign({
+			accessibility: 'none', // 'none', 'partial' or 'complete'
+			stopovers: false, // return stations on the way?
+			polylines: false // return leg shapes?
+		}, opt)
+
+		const filters = [
+			profile.formatProductsFilter(opt.products || {})
+		]
+		if (
+			opt.accessibility &&
+			profile.filters &&
+			profile.filters.accessibility &&
+			profile.filters.accessibility[opt.accessibility]
+		) {
+			filters.push(profile.filters.accessibility[opt.accessibility])
+		}
+
+		const query = {
+			jid: fromTripId,
+			locData: { // when & where the trip has been entered
+				loc: firstStation,
+				type: 'DEP', // todo: are there other values?
+				date: profile.formatDate(profile, departureAtFirst),
+				time: profile.formatTime(profile, departureAtFirst)
+			},
+			arrLocL: [to],
+			jnyFltrL: filters,
+			getPasslist: !!opt.stopovers,
+			getPolyline: !!opt.polylines,
+			sotMode: 'JI' // todo: this is required, but what is it for?
+		}
+
+		return request(profile, userAgent, opt, {
+			cfg: {polyEnc: 'GPA'},
+			meth: 'SearchOnTrip',
+			req: query
+		})
+		.then((d) => {
+			if (!Array.isArray(d.outConL)) return []
+
+			const parse = profile.parseJourney(profile, opt, {
+				locations: d.locations,
+				lines: d.lines,
+				hints: d.hints,
+				warnings: d.warnings,
+				polylines: opt.polylines && d.common.polyL || []
+			})
+			return d.outConL.map(parse)
+		})
+	}
+
 	const locations = (query, opt = {}) => {
 		if (!isNonEmptyString(query)) {
 			throw new Error('query must be a non-empty string.')
@@ -528,6 +594,7 @@ const createClient = (profile, userAgent, request = _request) => {
 	if (profile.trip) client.trip = trip
 	if (profile.radar) client.radar = radar
 	if (profile.refreshJourney) client.refreshJourney = refreshJourney
+	if (profile.journeysFromTrip) client.journeysFromTrip = journeysFromTrip
 	if (profile.reachableFrom) client.reachableFrom = reachableFrom
 	Object.defineProperty(client, 'profile', {value: profile})
 	return client
