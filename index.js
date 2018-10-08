@@ -275,25 +275,37 @@ const createClient = (profile, userAgent, request = _request) => {
 		})
 	}
 
-	const journeysFromTrip = (fromTripId, firstStation, departureAtFirst, to, opt = {}) => {
+	const journeysFromTrip = (fromTripId, previousStopover, to, opt = {}) => {
 		if (!isNonEmptyString(fromTripId)) {
 			throw new Error('fromTripId must be a non-empty string.')
 		}
 		to = profile.formatLocation(profile, to, 'to')
 
-		// first station of the whole trip
-		if (isObj(firstStation)) firstStation = profile.formatStation(firstStation.id)
-		else if ('string' === typeof firstStation) firstStation = profile.formatStation(firstStation)
-		else throw new Error('firstStation must be an object or a string.')
-		// departureAtFirst at the first station of the whole trip
-		departureAtFirst = +new Date(departureAtFirst)
-		if (Number.isNaN(departureAtFirst)) throw new Error('departureAtFirst is invalid')
+		if (!isObj(previousStopover)) throw new Error('previousStopover must be an object.')
+
+		let prevStop = previousStopover.stop
+		if (isObj(prevStop)) prevStop = profile.formatStation(prevStop.id)
+		else if ('string' === typeof prevStop) prevStop = profile.formatStation(prevStop)
+		else throw new Error('previousStopover.stop must be a stop object or a string.')
+
+		if (!isNonEmptyString(previousStopover.departure)) {
+			throw new Error('previousStopover.departure must be a string')
+		}
+		const depAtPrevStop = +new Date(previousStopover.departure)
+		if (Number.isNaN(depAtPrevStop)) throw new Error('previousStopover.departure is invalid')
+		if (depAtPrevStop > Date.now()) throw new Error('previousStopover.departure must be in the past')
 
 		opt = Object.assign({
 			accessibility: 'none', // 'none', 'partial' or 'complete'
 			stopovers: false, // return stations on the way?
-			polylines: false // return leg shapes?
+			polylines: false, // return leg shapes?
+			transferTime: 0, // minimum time for a single transfer in minutes
+			tickets: false, // return tickets?
+			remarks: true // parse & expose hints & warnings?
 		}, opt)
+
+		// make clear that `when` is not supported
+		if (opt.when) throw new Error('opt.when is not supported by HAFAS.')
 
 		const filters = [
 			profile.formatProductsFilter(opt.products || {})
@@ -307,18 +319,32 @@ const createClient = (profile, userAgent, request = _request) => {
 			filters.push(profile.filters.accessibility[opt.accessibility])
 		}
 
+		// todo: are these supported?
+		// - outFrwd
+		// - getPT
+		// - getIV
+		// - trfReq
+		// features from `journeys()` not supported here:
+		// - `maxChg`: maximum nr of transfers
+		// - `bike`: only bike-friendly journeys
+		// - `results`: how many journeys?
+		// - `via`: let journeys pass this station
+		// todo: find a way to support them
+
 		const query = {
 			jid: fromTripId,
 			locData: { // when & where the trip has been entered
-				loc: firstStation,
+				loc: prevStop,
 				type: 'DEP', // todo: are there other values?
-				date: profile.formatDate(profile, departureAtFirst),
-				time: profile.formatTime(profile, departureAtFirst)
+				date: profile.formatDate(profile, depAtPrevStop),
+				time: profile.formatTime(profile, depAtPrevStop)
 			},
 			arrLocL: [to],
 			jnyFltrL: filters,
 			getPasslist: !!opt.stopovers,
 			getPolyline: !!opt.polylines,
+			minChgTime: opt.transferTime,
+			getTariff: !!opt.tickets,
 			sotMode: 'JI' // todo: this is required, but what is it for?
 		}
 
