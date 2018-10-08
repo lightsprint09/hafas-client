@@ -30,6 +30,7 @@ const testJourneysWithDetour = require('./lib/journeys-with-detour')
 const testReachableFrom = require('./lib/reachable-from')
 
 const isObj = o => o !== null && 'object' === typeof o && !Array.isArray(o)
+const minute = 60 * 1000
 
 const when = createWhen('Europe/Berlin', 'de-DE')
 
@@ -79,6 +80,8 @@ const wedding = '008089131'
 const württembergallee = '731084'
 const regensburgHbf = '8000309'
 const blnOstbahnhof = '8010255'
+const berlinSüdkreuz = '8011113'
+const kölnHbf = '8000207'
 
 test('journeys – Berlin Schwedter Str. to München Hbf', co(function* (t) {
 	const journeys = yield client.journeys(blnSchwedterStr, münchenHbf, {
@@ -204,6 +207,56 @@ test('refreshJourney', co(function* (t) {
 		toId: münchenHbf,
 		when
 	})
+	t.end()
+}))
+
+test('journeysFromTrip, Südkreuz -> München Hbf, then to Köln Hbf', co(function* (t) {
+	// `journeysFromTrip` only supports queries *right now*, so can't use the
+	// unified `when` used in all other tests. This makes this test brittle
+	// during the night. 🙄
+	const [origJourney] = yield client.journeys(berlinSüdkreuz, münchenHbf, {
+		departure: Date.now() - 90 * minute,
+		transfers: 1, results: 1, stopovers: true, remarks: false
+	})
+	const origLeg = origJourney.legs.find((leg) => {
+		const dest = leg.destination
+		return dest.id === münchenHbf || (dest.station && dest.station.id === münchenHbf)
+	})
+	t.ok(origLeg, 'precondition failed: leg towards destination not found')
+
+	// find the latest stopover in the past
+	const origStopoversRev = Array.from(origLeg.stopovers)
+	origStopoversRev.reverse()
+	const prevStopover = origStopoversRev.find((stopover) => {
+		return stopover.departure && new Date(stopover.departure) < Date.now()
+	})
+	t.ok(prevStopover, 'precondition failed: stopover in the past not found')
+	const prevStopId = prevStopover.stop.id
+	const prevStationId = prevStopover.station && prevStopover.station.id
+
+	const journeys = yield client.journeysFromTrip(origLeg.id, prevStopover, kölnHbf)
+
+	const customCfg = Object.assign({}, cfg)
+	customCfg.when = new Date()
+	const validate = createValidate(customCfg, {station: validateStation})
+
+	// put fake prices to make the validation pass
+	const journeysWithPrice = journeys.map((j) => {
+		const clone = Object.assign({}, j)
+		clone.price = {amount: 123, currency: 'EUR'}
+		return clone
+	})
+	validate(t, journeysWithPrice, 'journeys', 'journeysFromTrip')
+
+	for (let i = 0; i < journeys.length; i++) {
+		const j = journeys[i]
+		// todo: validate origin
+
+		const d = j.legs[j.legs.length - 1].destination
+		const dName = `journeys[${i}][${j.legs.length - 1}].destination`
+		t.ok(d.id === kölnHbf || (d.station && d.station.id === kölnHbf), dName + ' is invalid')
+	}
+
 	t.end()
 }))
 
